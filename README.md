@@ -1,8 +1,11 @@
-# React + Vite
+# SUPERCHAT
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+**SUPERCHAT** is a real-time chat application that integrates with Google Sign-In for user authentication and uses Firebase for storing and retrieving chat messages. It supports user selection, messaging, and maintains a responsive design suitable for both desktop and mobile views.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **User Authentication**: Sign in using Google accounts.
+- **Real-Time Messaging**: Send and receive messages in real-time.
+- **User Profile**: Display user profiles with names and photos.
+- **Responsive Design**: Optimized for both desktop and mobile devices.
+- **Chat Management**: Select users, view chat history, and close chats.
