@@ -191,14 +191,15 @@ function App() {
                       alt="User"
                       className="w-8 h-8 rounded-full"
                     />
-                    <span>{user.displayName}</span>
-                  </span>
-                  <button
+                    {/* <span>{user.displayName}</span> */}
+                    <button
                     onClick={() => auth.signOut()}
                     className="px-4 py-2 bg-gray-700 text-white rounded-2xl hover:bg-gray-800"
                   >
                     Logout
                   </button>
+                  </span>
+                  
                 </div>
               </div>
               <div className="flex-grow overflow-y-auto p-4">
