@@ -255,6 +255,7 @@ function App() {
         </>
       ) : (
         <div className="flex flex-col items-center justify-center h-screen w-screen bg-white">
+          <img className="w-16 sm:w-24 md:w-32 lg:w-48 xl:w-64 filter shadow-black drop-shadow-lg drop-shadow-black" src='logo.png' />
           <h1 className='font-bold'><b>SUPERCHAT</b><br/></h1>
           <h2 className="font-semibold"><b> Connect. Converse. Conquer.</b><br/> <br/> </h2>
           <button onClick={handleLogin} className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 ">Sign in with Google</button>
