@@ -1,7 +1,10 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import { useState, useEffect, useRef } from 'react';
 import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup } from 'firebase/auth';
 import { getFirestore, onSnapshot, collection, orderBy, serverTimestamp, query, addDoc, doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, app } from "../firebase";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { storage } from "../firebase";
 
 const db = getFirestore(app);
 
@@ -13,6 +16,9 @@ function App() {
   const [users, setUsers] = useState([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const endOfMessagesRef = useRef(null);
+  const [file, setFile] = useState(null);
+  const [filePreview, setFilePreview] = useState({ url: '', type: '' });
+  const fileInputRef = useRef(null);  
 
   useEffect(() => {
     const q = query(collection(db, "messages"), orderBy("timestamp"));
@@ -49,22 +55,37 @@ function App() {
     return unsubscribe;
   }, []);
 
+
   const sendMessage = async () => {
-    if (newMessage.trim() === "") {
+    if (newMessage.trim() === "" && !file) {
       return; 
     }
 
     try {
+      let fileURL = '';
+      if (file) {
+        const fileRef = ref(storage, `files/${file.name}`);
+        await uploadBytes(fileRef, file);
+        fileURL = await getDownloadURL(fileRef);
+      }
+
       await addDoc(collection(db, "messages"), {
         uid: user.uid,
         photoURL: user.photoURL,
         displayName: user.displayName,
         text: newMessage,
+        fileURL: fileURL,
+        fileType: file ? file.type : '',
         timestamp: serverTimestamp(),
-        to: selectedUser ? selectedUser.uid : null 
+        to: selectedUser ? selectedUser.uid : null
       });
 
       setNewMessage("");
+      setFile(null);
+      setFilePreview({ url: '', type: '' }); 
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''; // Reset the file input value
+      }
     } catch (error) {
       console.error("Error sending message: ", error);
     }
@@ -110,6 +131,28 @@ function App() {
       e.preventDefault();
       sendMessage();
     }
+  };
+  const handleFileChange = (e) => {
+    if (e.target.files[0]) {
+      const selectedFile = e.target.files[0];
+      setFile(selectedFile);
+    }
+  };
+  useEffect(() => {
+    if (file) {
+      const url = URL.createObjectURL(file);
+      setFilePreview({ url: url, type: file.type });
+      return () => URL.revokeObjectURL(url);
+    }
+  }, [file]);
+
+  const handleClosePreview = () => {
+    setNewMessage("");
+    setFile(null);
+    setFilePreview({ url: '', type: '' });
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''; // Reset the file input value
+    } 
   };
 
   return (
@@ -167,9 +210,6 @@ function App() {
           {selectedUser ? (
             <div className="flex flex-col flex-grow bg-gray-100 ml-0 md:ml-64">
               <div className="bg-white p-5  shadow relative flex flex-col md:flex-row md:items-center">
-                {/* <div className="text-xl font-bold text-center md:flex-grow md:text-left">
-                  {selectedUser ? `${selectedUser.displayName}` : ""}
-                </div> */}
                 <div className="flex items-center">
                     {selectedUser && (
                       <>
@@ -191,10 +231,9 @@ function App() {
                       alt="User"
                       className="w-8 h-8 rounded-full"
                     />
-                    {/* <span>{user.displayName}</span> */}
                     <button
                     onClick={() => auth.signOut()}
-                    className="px-4 py-2 bg-gray-700 text-white rounded-2xl hover:bg-gray-800"
+                    className="px-4 py-2 bg-gray-700 text-white rounded-full hover:bg-gray-800"
                   >
                     Logout
                   </button>
@@ -202,6 +241,33 @@ function App() {
                   
                 </div>
               </div>
+              {filePreview.url && (
+                <div className="fixed bottom-14 left-30 p-2 bg-gray-300 rounded-2xl ">
+                  {/* Close Button */}
+                  <button
+                    onClick={handleClosePreview}
+                    className="absolute w-10 h-10 top-2 right-2 bg-gray-800 text-white p-1 rounded-2xl hover:bg-gray-900"
+                  >
+                    &times; 
+                  </button>
+
+                  {/* File Preview Content */}
+                  {filePreview.type.includes("image") ? (
+                    <img src={filePreview.url} alt="Preview" className="max-w-full rounded-xl " />
+                  ) : filePreview.type.includes("video") ? (
+                    <video controls className="max-w-full">
+                      <source src={filePreview.url} type={filePreview.type} />
+                      Your browser does not support the video tag.
+                    </video>
+                  ) : filePreview.type.includes("audio") ? (
+                    <audio controls>
+                      <source src={filePreview.url} type={filePreview.type} />
+                      Your browser does not support the audio tag.
+                    </audio>
+                  ) : null}
+                </div>
+              )}
+
               <div className="flex-grow overflow-y-auto p-4">
                 {filteredMessages.map(msg => (
                   <div
@@ -215,9 +281,25 @@ function App() {
                         className="w-8 h-8 rounded-full mr-2"
                       />
                     )}
-                    <div className={`${msg.data.uid === user.uid ? 'bg-blue-500 text-white' : 'bg-gray-200 text-black'} p-3 rounded-lg max-w-xs`}>
+                    <div className={`${msg.data.uid === user.uid ? 'bg-gray-600 text-white' : 'bg-gray-300 text-black'} p-3 rounded-lg max-w-xs`}>
                       <strong>{msg.data.displayName}</strong>
-                      <p>{msg.data.text}</p>
+                      {msg.data.fileURL ? (
+                        msg.data.fileType.includes("image") ? (
+                          <img src={msg.data.fileURL} alt="Uploaded" className="max-w-full" />
+                        ) : msg.data.fileType.includes("video") ? (
+                          <video controls className="max-w-full">
+                            <source src={msg.data.fileURL} type={msg.data.fileType} />
+                            Your browser does not support the video tag.
+                          </video>
+                        ) : msg.data.fileType.includes("audio") ? (
+                          <audio controls>
+                            <source src={msg.data.fileURL} type={msg.data.fileType} />
+                            Your browser does not support the audio tag.
+                          </audio>
+                        ) : null
+                      ) : (
+                        <p>{msg.data.text}</p>
+                      )}
                     </div>
                     {msg.data.uid === user.uid && (
                       <img
@@ -233,35 +315,87 @@ function App() {
               {/* Close Chat Button */}
               <button
                   onClick={() => setSelectedUser(null)}
-                  className="fixed bottom-20 left-4 z-50 px-4 py-2 bg-gray-700 text-white rounded-full hover:bg-gray-800"
+                  className="fixed   bottom-20 left-4 z-50 px-4 py-2 bg-gray-700 text-white rounded-full hover:bg-gray-800"
                 >
                   Close Chat
                 </button>
-              <div className="p-4 flex items-center">
-                <input
-                  value={newMessage}
-                  onChange={e => setNewMessage(e.target.value)}
-                  onKeyDown={handleKeyPress}
-                  className="w-full px-4 py-2 border border-gray-300 rounded mr-2"
-                  placeholder="Type your message here..."
-                />
-                <button onClick={sendMessage} className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">Send</button>
+                <div className="relative p-4 flex items-center">
+                  <input
+                    type="file"
+                    onChange={handleFileChange}
+                    accept="image/*, video/*, audio/*"
+                    ref={fileInputRef}
+                    id="file-input"
+                    className="hidden"
+                  />
+                  <label htmlFor="file-input" className="absolute top--2 left-6 p-1 cursor-pointer">
+                    <img src="file.png" alt="Attach" className="w-6 h-6" />
+                  </label>
+                  <input
+                    value={newMessage}
+                    onChange={e => setNewMessage(e.target.value)}
+                    onKeyDown={handleKeyPress}
+                    className="w-full pl-12 py-2 border border-gray-300 rounded-full"
+                    placeholder="Type your message here..."
+                  />
+                  <button onClick={sendMessage} className="px-4 py-2 bg-gray-700 text-white rounded-full hover:bg-gray-800">
+                    Send
+                  </button>
+                </div>
               </div>
-            </div>
-          ) : (
-            <div className="flex-grow bg-gray-100 flex items-center justify-center text-center">
+          ) : (<div className="flex-grow bg-gray-100 flex items-center justify-center text-center">
+            <div className="flex flex-col items-center justify-center space-y-2">
               <h2 className="text-2xl font-bold">Connect. Converse. Conquer.</h2>
+              <p>Share it with your friends to chat in private</p>
+              <img
+                src="./share.png"
+                className="h-6 w-6 cursor-pointer"
+                onClick={() => {
+                  if (navigator.share) {
+                    navigator.share({
+                      title: 'Check out this app!',
+                      text: 'Check out this cool app and chat with me in private!',
+                      url: 'https://superchat-tau-seven.vercel.app/', 
+                    })
+                    .then(() => console.log('Successfully shared'))
+                    .catch((error) => console.log('Error sharing:', error));
+                  } else {
+                    console.log('Share API not supported in this browser');
+                  }
+                }}
+              />
             </div>
+          </div>          
           )}
         </>
       ) : (
-        <div className="flex flex-col items-center justify-center h-screen w-screen bg-white">
-          <img className="w-16 sm:w-24 md:w-32 lg:w-48 xl:w-64 filter shadow-black drop-shadow-lg drop-shadow-black" src='logo.png' />
-          <h1 className='font-bold'><b>SUPERCHAT</b><br/></h1>
-          <h2 className="font-semibold"><b> Connect. Converse. Conquer.</b><br/> <br/> </h2>
+        <div className="flex flex-col items-center justify-center h-screen w-screen space-y-2 bg-white">
+          <img 
+            className="w-32 sm:w-48 md:w-52 lg:w-64 xl:w-128 filter shadow-black drop-shadow-lg drop-shadow-black" 
+            src='logo.png' 
+          />
+          <h1 className='font-bold'><b>SUPERCHAT</b></h1>
+          <h2 className="font-semibold"><b> Connect. Converse. Conquer.</b></h2>
           <button onClick={handleLogin} className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 ">Sign in with Google</button>
-          <br/>
-          <h2 className="font-semibold"><b> App still in development , more features will be added.</b><br/> <br/> </h2>
+          <p>Share it with your friends to chat in private</p>
+              <img
+                src="./share.png"
+                className="h-6 w-6 cursor-pointer"
+                onClick={() => {
+                  if (navigator.share) {
+                    navigator.share({
+                      title: 'Check out this app!',
+                      text: 'Check out this cool app and chat with me in private!',
+                      url: 'https://superchat-tau-seven.vercel.app/',
+                    })
+                    .then(() => console.log('Successfully shared'))
+                    .catch((error) => console.log('Error sharing:', error));
+                  } else {
+                    console.log('Share API not supported in this browser');
+                  }
+                }}
+              />
+          <p><b> App still in development more features will be added.</b></p>
         </div>
       )}
     </div>
