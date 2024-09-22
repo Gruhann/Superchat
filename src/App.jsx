@@ -85,13 +85,13 @@ const App = () => {
     }, (err) => {
       console.error('Could not copy text: ', err);
     });
-  };
+  };  
 
   const shareRoomKey = () => {
     if (navigator.share) {
       navigator.share({
         title: 'Join My Room',
-        text: `Join my chat room using the code: ${newRoomKey}`,
+        text: `Join my chat room using the code: ${newRoomKey} https://superchat-tau-seven.vercel.app/`,
       }).catch(console.error);
     } else {
       alert(`Share this room key: ${newRoomKey}`);
