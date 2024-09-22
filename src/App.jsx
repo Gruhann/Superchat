@@ -1,405 +1,345 @@
-/* eslint-disable react-hooks/exhaustive-deps */
 import { useState, useEffect, useRef } from 'react';
-import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup } from 'firebase/auth';
-import { getFirestore, onSnapshot, collection, orderBy, serverTimestamp, query, addDoc, doc, getDoc, setDoc } from "firebase/firestore";
-import { auth, app } from "../firebase";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { storage } from "../firebase";
+import { auth, db } from '../firebase.js';
+import { Menu, X, Send, LogOut, Users, PlusCircle, Copy, Share2 } from 'lucide-react';
+import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence, updateProfile } from 'firebase/auth';
+import { collection, setDoc, doc, addDoc, getDoc, query, orderBy, onSnapshot, serverTimestamp } from 'firebase/firestore';
 
-const db = getFirestore(app);
-
-function App() {
+const App = () => {
   const [user, setUser] = useState(null);
+  const [username, setUsername] = useState('');
+  const [roomKey, setRoomKey] = useState('');
+  const [currentRoom, setCurrentRoom] = useState(null);
+  const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
-  const [newMessage, setNewMessage] = useState("");
-  const [selectedUser, setSelectedUser] = useState(null);
-  const [users, setUsers] = useState([]);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const endOfMessagesRef = useRef(null);
-  const [file, setFile] = useState(null);
-  const [filePreview, setFilePreview] = useState({ url: '', type: '' });
-  const fileInputRef = useRef(null);  
+  const [newRoomKey, setNewRoomKey] = useState('');
+  const [joinRoomKey, setJoinRoomKey] = useState('');
+  const [showUsernamePrompt, setShowUsernamePrompt] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  
+
+  const chatContainerRef = useRef(null);
 
   useEffect(() => {
-    const q = query(collection(db, "messages"), orderBy("timestamp"));
-    const unsubscribe = onSnapshot(q, snapshot => {
-      setMessages(snapshot.docs.map(doc => ({
-        id: doc.id,
-        data: doc.data()
-      })));
-    });
-    return unsubscribe;
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, user => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         setUser(user);
-
-        const usersQuery = query(collection(db, "users"), orderBy("displayName"));
-        const unsubscribeUsers = onSnapshot(usersQuery, snapshot => {
-          const usersList = snapshot.docs.map(doc => ({
-            uid: doc.id,
-            displayName: doc.data().displayName,
-            photoURL: doc.data().photoURL
-          }));
-          setUsers(usersList);
-        });
-        return unsubscribeUsers;
-      } else {
-        setUser(null);
-        setUsers([]);
+        if (!user.displayName) {
+          setShowUsernamePrompt(true);
+        }
       }
     });
-
-    return unsubscribe;
+    return () => unsubscribe();
   }, []);
 
-
-  const sendMessage = async () => {
-    if (newMessage.trim() === "" && !file) {
-      return; 
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
+  }, [messages]);
 
-    try {
-      let fileURL = '';
-      if (file) {
-        const fileRef = ref(storage, `files/${file.name}`);
-        await uploadBytes(fileRef, file);
-        fileURL = await getDownloadURL(fileRef);
-      }
-
-      await addDoc(collection(db, "messages"), {
-        uid: user.uid,
-        photoURL: user.photoURL,
-        displayName: user.displayName,
-        text: newMessage,
-        fileURL: fileURL,
-        fileType: file ? file.type : '',
-        timestamp: serverTimestamp(),
-        to: selectedUser ? selectedUser.uid : null
-      });
-
-      setNewMessage("");
-      setFile(null);
-      setFilePreview({ url: '', type: '' }); 
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ''; // Reset the file input value
-      }
-    } catch (error) {
-      console.error("Error sending message: ", error);
-    }
-  };
-
-  const handleLogin = async () => {
+  const handleGoogleLogin = async () => {
     const provider = new GoogleAuthProvider();
     try {
+      await setPersistence(auth, browserLocalPersistence);
       const result = await signInWithPopup(auth, provider);
-      const user = result.user;
-
-      // Add user to Firestore if not already present
-      const userDocRef = doc(db, "users", user.uid);
-      const userDoc = await getDoc(userDocRef);
-
-      if (!userDoc.exists()) {
-        await setDoc(userDocRef, {
-          displayName: user.displayName,
-          photoURL: user.photoURL,
-          email: user.email,
-        });
+      setUser(result.user);
+      if (!result.user.displayName) {
+        setShowUsernamePrompt(true);
       }
     } catch (error) {
-      console.error("Error during sign-in: ", error);
+      console.error('Google Sign-In failed:', error);
     }
   };
 
-  const filteredMessages = selectedUser
-    ? messages.filter(msg => 
-        (msg.data.uid === user.uid && msg.data.to === selectedUser.uid) ||
-        (msg.data.uid === selectedUser.uid && msg.data.to === user.uid)
-      )
-    : [];
-
-  useEffect(() => {
-    if (endOfMessagesRef.current && selectedUser) {
-      endOfMessagesRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [filteredMessages, selectedUser]);
-
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      sendMessage();
+  const handleSetUsername = async () => {
+    if (username.trim()) {
+      try {
+        await updateProfile(auth.currentUser, { displayName: username });
+        setUser({ ...auth.currentUser, displayName: username });
+        setShowUsernamePrompt(false);
+      } catch (error) {
+        console.error('Error setting username:', error);
+      }
     }
   };
-  const handleFileChange = (e) => {
-    if (e.target.files[0]) {
-      const selectedFile = e.target.files[0];
-      setFile(selectedFile);
-    }
-  };
-  useEffect(() => {
-    if (file) {
-      const url = URL.createObjectURL(file);
-      setFilePreview({ url: url, type: file.type });
-      return () => URL.revokeObjectURL(url);
-    }
-  }, [file]);
 
-  const handleClosePreview = () => {
-    setNewMessage("");
-    setFile(null);
-    setFilePreview({ url: '', type: '' });
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ''; // Reset the file input value
-    } 
+  const generateRoomKey = async () => {
+    try {
+      const generatedKey = Math.random().toString(36).substring(2, 8);
+      setRoomKey(generatedKey);
+      setNewRoomKey(generatedKey);
+
+      await setDoc(doc(db, 'rooms', generatedKey), {
+        roomKey: generatedKey,
+        createdAt: serverTimestamp(),
+        owner: user.uid,
+      });
+    } catch (error) {
+      console.error('Error generating room key:', error);
+    }
   };
+
+  const copyRoomKey = () => {
+    navigator.clipboard.writeText(newRoomKey).then(() => {
+      console.log('Room key copied to clipboard!');
+    }, (err) => {
+      console.error('Could not copy text: ', err);
+    });
+  };
+
+  const shareRoomKey = () => {
+    if (navigator.share) {
+      navigator.share({
+        title: 'Join My Room',
+        text: `Join my chat room using the code: ${newRoomKey}`,
+      }).catch(console.error);
+    } else {
+      alert(`Share this room key: ${newRoomKey}`);
+    }
+  };
+
+  const joinRoom = async () => {
+    if (!joinRoomKey) return;
+
+    const roomRef = doc(db, 'rooms', joinRoomKey);
+    const room = await getDoc(roomRef);
+
+    if (room.exists()) {
+      setCurrentRoom(joinRoomKey);
+      setRoomKey(joinRoomKey);
+      subscribeToMessages(joinRoomKey);
+      setJoinRoomKey('');
+    } else {
+      alert('Room not found');
+    }
+  };
+
+  const exitRoom = () => {
+    setCurrentRoom(null);
+    setRoomKey('');
+    setMessages([]);
+  };
+
+  const subscribeToMessages = (roomId) => {
+    const q = query(collection(db, 'rooms', roomId, 'messages'), orderBy('createdAt'));
+    onSnapshot(q, (snapshot) => {
+      const messagesData = snapshot.docs.map((doc) => doc.data());
+      setMessages(messagesData);
+    });
+  };
+
+  const sendMessage = async (e) => {
+    e.preventDefault();
+    if (message.trim() === '') return;
+
+    try {
+      await addDoc(collection(db, 'rooms', roomKey, 'messages'), {
+        text: message,
+        user: user.displayName || user.email,
+        createdAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error('Error sending message:', error);
+    }
+
+    setMessage('');
+  };
+
+  const handleLogout = () => {
+    signOut(auth);
+    setUser(null);
+    setCurrentRoom(null);
+    setRoomKey('');
+  };
+
+  const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
 
   return (
-    <div className="flex h-screen w-screen">
-      {user ? (
-        <>
-          {/* Side Menu Button (Mobile Only) */}
-          <button
-            onClick={() => setMenuOpen(!menuOpen)}
-            className="fixed top-4 left-4 z-50 px-4 py-2 bg-gray-700 text-white rounded-full hover:bg-gray-800 md:hidden"
-          >
-            ☰
+    <div className="h-screen w-screen flex bg-gray-100">
+      {/* Sidebar */}
+      <div className={`fixed inset-y-0 left-0 transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:relative lg:translate-x-0 transition duration-200 ease-in-out z-30 w-64 bg-gray-900 text-white rounded-r-3xl`}>
+        <div className="flex items-center justify-between p-4">
+          <h1 className="text-3xl font-extrabold">SuperChat</h1>
+          <button onClick={toggleSidebar} className="lg:hidden bg-gray-900 rounded-full">
+            <X size={24} />
           </button>
-
-          {/* Side Menu Panel (Always Open on Desktop) */}
-          <div className={`fixed top-0 left-0 h-full w-64 bg-gray-800 text-white p-4 overflow-y-auto transition-transform transform ${menuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 md:w-64 z-40`}>
-            <div className="text-center text-xl font-bold mb-4">Users</div>
-            {users.map(u => (
-              <div
-                key={u.uid}
-                onClick={() => {
-                  setSelectedUser(u);
-                  setMenuOpen(false); 
-                }}
-                className={`p-2 cursor-pointer ${selectedUser?.uid === u.uid ? 'bg-gray-700 rounded-lg' : 'hover:bg-gray-700 rounded'}`}
+        </div>
+        <div className="p-4">
+          {user ? (
+            <>
+              <div className="mb-4">
+                <p className="text-xs opacity-70">Logged in as</p>
+                <p className="font-semibold">{user.displayName || user.email}</p>
+              </div>
+              <button 
+                onClick={handleLogout}
+                className=" px-4 py-2 bg-white text-gray-900 rounded-full hover:bg-gray-300 transition-colors duration-200 flex items-center justify-center"
               >
-                <img
-                  src={u.photoURL}
-                  alt="User"
-                  className="w-8 h-8 rounded-full inline-block mr-2"
-                />
-                <span>{u.displayName}</span>
-              </div>
-            ))}
-          </div>
+                <LogOut size={18} className="mr-2" />
+                Logout
+              </button>
+            </>
+          ) : (
+            <button 
+              onClick={handleGoogleLogin}
+              className=" px-4 py-2 bg-white text-gray-900 rounded-full hover:bg-gray-200 transition-colors duration-200 flex items-center justify-center"
+            >
+              <Users size={18} className="mr-2" />
+              Login with Google
+            </button>
+          )}
+        </div>
+        
+      </div>
 
-          {/* Chat Panel */}
-          <div className="absolute top-4 right-4 flex flex-col md:flex-row items-center space-y-2 md:space-y-0 md:space-x-4">
-                  <span className="flex items-center space-x-2">
-                    <img
-                      src={user.photoURL}
-                      alt="User"
-                      className="w-8 h-8 rounded-full"
-                    />
-                    {/* <span>{user.displayName}</span> */}
-                    <button
-                    onClick={() => auth.signOut()}
-                    className="px-4 py-2 bg-gray-700 text-white rounded-2xl hover:bg-gray-800"
-                  >
-                    Logout
-                  </button>
-                  </span>
-                  
-                </div>
-          {selectedUser ? (
-            <div className="flex flex-col flex-grow bg-gray-100 ml-0 md:ml-64">
-              <div className="bg-white p-5  shadow relative flex flex-col md:flex-row md:items-center">
-                <div className="flex items-center">
-                    {selectedUser && (
-                      <>
-                        <img
-                          src={selectedUser.photoURL}
-                          alt="User"
-                          className="w-8 h-8 rounded-full mr-2"
-                        />
-                        <span className="text-xl font-bold">
-                          {selectedUser.displayName}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                <div className="absolute top-4 right-4 flex flex-col md:flex-row items-center space-y-2 md:space-y-0 md:space-x-4">
-                  <span className="flex items-center space-x-2">
-                    <img
-                      src={user.photoURL}
-                      alt="User"
-                      className="w-8 h-8 rounded-full"
-                    />
-                    <button
-                    onClick={() => auth.signOut()}
-                    className="px-4 py-2 bg-gray-700 text-white rounded-full hover:bg-gray-800"
-                  >
-                    Logout
-                  </button>
-                  </span>
-                  
-                </div>
+      {/* Main content */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Top bar */}
+        <div className="bg-white shadow-lg p-4 flex justify-around items-center rounded-b-3xl">
+          <button onClick={toggleSidebar} className="lg:hidden">
+            <Menu size={24} />
+          </button>
+          {currentRoom && (
+            <div className="flex items-center">
+              <h2 className="text-lg font-semibold">Room: {currentRoom}</h2>
+              <button 
+                onClick={exitRoom}
+                className="ml-4 px-3 py-1 bg-red-100 text-red-600 rounded-full text-sm hover:bg-red-200 transition-colors duration-200"
+              >
+                Exit
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Main area */}
+        <div className="flex-1 overflow-hidden p-4">
+          <div className="h-full bg-white rounded-3xl shadow-2xl shadow-black/50 overflow-hidden flex flex-col">
+            {!user ? (
+              <div className="h-full flex flex-col items-center justify-center p-8">
+                <img src="/logo.png" alt="SuperChat Logo" className="w-48 h-48 mb-8" />
+                <h2 className="text-2xl font-extrabold mb-4">Welcome to SuperChat</h2>
+                <p className="text-gray-600 mb-8">Please log in to start chatting</p>
+                <button 
+                  onClick={handleGoogleLogin}
+                  className="px-6 py-3 bg-gray-800 text-white rounded-full hover:bg-gray-900 transition-colors duration-200 flex items-center justify-center text-lg"
+                >
+                  <Users size={24} className="mr-2" />
+                  Login with Google
+                </button>
               </div>
-              {filePreview.url && (
-                <div className="fixed bottom-14 left-30 p-2 bg-gray-300 rounded-2xl ">
-                  {/* Close Button */}
+            ) : !currentRoom ? (
+              <div className="h-full flex flex-col items-center justify-center p-8">
+                <h2 className="text-2xl font-extrabold mb-4">Create or Join a Room</h2>
+                <p className="text-gray-600 font-bold mb-8">Get started with your chat room</p>
+                <div className="flex flex-col items-center w-full max-w-md">
                   <button
-                    onClick={handleClosePreview}
-                    className="absolute w-10 h-10 top-2 right-2 bg-gray-800 text-white p-1 rounded-2xl hover:bg-gray-900"
+                    onClick={generateRoomKey}
+                    className=" px-6 py-3 bg-gray-800 text-white rounded-2xl hover:bg-gray-900 transition-colors duration-200 mb-4 flex items-center justify-center text-lg"
                   >
-                    &times; 
+                    <PlusCircle size={24} className="mr-2" />
+                    Create New Room
                   </button>
-
-                  {/* File Preview Content */}
-                  {filePreview.type.includes("image") ? (
-                    <img src={filePreview.url} alt="Preview" className="max-w-full rounded-xl " />
-                  ) : filePreview.type.includes("video") ? (
-                    <video controls className="max-w-full">
-                      <source src={filePreview.url} type={filePreview.type} />
-                      Your browser does not support the video tag.
-                    </video>
-                  ) : filePreview.type.includes("audio") ? (
-                    <audio controls>
-                      <source src={filePreview.url} type={filePreview.type} />
-                      Your browser does not support the audio tag.
-                    </audio>
-                  ) : null}
+                  <div className="w-full flex items-center mb-4">
+                    <input
+                      type="text"
+                      value={joinRoomKey}
+                      onChange={(e) => setJoinRoomKey(e.target.value)}
+                      placeholder="Enter room key"
+                      className="flex-1 p-3 border border-gray-300 rounded-l-full focus:outline-none focus:ring-2 focus:ring-gray-500"
+                    />
+                    <button
+                      onClick={joinRoom}
+                      className="p-3 md:px-6 md:py-3 bg-gray-700 text-white rounded-r-full hover:bg-gray-800 transition-colors duration-200"
+                    >
+                      Join
+                    </button>
+                  </div>
                 </div>
-              )}
-
-              <div className="flex-grow overflow-y-auto p-4">
-                {filteredMessages.map(msg => (
-                  <div
-                    key={msg.id}
-                    className={`flex items-start mb-4 ${msg.data.uid === user.uid ? 'justify-end' : 'justify-start'}`}
-                  >
-                    {msg.data.uid !== user.uid && (
-                      <img
-                        src={msg.data.photoURL}
-                        alt="User"
-                        className="w-8 h-8 rounded-full mr-2"
-                      />
-                    )}
-                    <div className={`${msg.data.uid === user.uid ? 'bg-gray-600 text-white' : 'bg-gray-300 text-black'} p-3 rounded-lg max-w-xs`}>
-                      <strong>{msg.data.displayName}</strong>
-                      {msg.data.fileURL ? (
-                        msg.data.fileType.includes("image") ? (
-                          <img src={msg.data.fileURL} alt="Uploaded" className="max-w-full" />
-                        ) : msg.data.fileType.includes("video") ? (
-                          <video controls className="max-w-full">
-                            <source src={msg.data.fileURL} type={msg.data.fileType} />
-                            Your browser does not support the video tag.
-                          </video>
-                        ) : msg.data.fileType.includes("audio") ? (
-                          <audio controls>
-                            <source src={msg.data.fileURL} type={msg.data.fileType} />
-                            Your browser does not support the audio tag.
-                          </audio>
-                        ) : null
-                      ) : (
-                        <p>{msg.data.text}</p>
-                      )}
+                {newRoomKey && (
+                  <div className="bg-green-100 p-4 rounded-xl mt-8 text-center">
+                    <p className="text-green-800 font-semibold">Your new room key: {newRoomKey}</p>
+                    <div className="flex justify-center mt-2">
+                      <button
+                        onClick={copyRoomKey}
+                        className="mr-2 px-3 py-1 bg-green-200 text-green-800 rounded-xl text-sm hover:bg-green-300 transition-colors duration-200 flex items-center"
+                      >
+                        <Copy size={14} className="mr-1" />
+                        Copy
+                      </button>
+                      <button
+                        onClick={shareRoomKey}
+                        className="px-3 py-1 bg-blue-200 text-blue-800 rounded-xl text-sm hover:bg-blue-300 transition-colors duration-200 flex items-center"
+                      >
+                        <Share2 size={14} className="mr-1" />
+                        Share
+                      </button>
                     </div>
-                    {msg.data.uid === user.uid && (
-                      <img
-                        src={msg.data.photoURL}
-                        alt="User"
-                        className="w-8 h-8 rounded-full ml-2"
-                      />
-                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-4">
+                {messages.map((msg, index) => (
+                  <div 
+                    key={index} 
+                    className={`mb-4 flex ${msg.user === (user.displayName || user.email) ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div className={`max-w-3/4 p-3 shadow-xl shadow-black/15 rounded-lg ${msg.user === (user.displayName || user.email) ? 'bg-gray-700 text-white' : 'bg-gray-200'}`}>
+                      <p className="font-bold text-sm mb-1">{msg.user}</p>
+                      <p>{msg.text}</p>
+                    </div>
                   </div>
                 ))}
-                <div ref={endOfMessagesRef} />
               </div>
-              {/* Close Chat Button */}
-              <button
-                  onClick={() => setSelectedUser(null)}
-                  className="fixed   bottom-20 left-4 z-50 px-4 py-2 bg-gray-700 text-white rounded-full hover:bg-gray-800"
-                >
-                  Close Chat
-                </button>
-                <div className="relative p-4 flex items-center">
+            )}
+            {/* Message input */}
+            {user && currentRoom && (
+              <div className="p-4 bg-white border-t">
+                <form onSubmit={sendMessage} className="flex items-center">
                   <input
-                    type="file"
-                    onChange={handleFileChange}
-                    accept="image/*, video/*, audio/*"
-                    ref={fileInputRef}
-                    id="file-input"
-                    className="hidden"
+                    type="text"
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    className="flex-1 p-3 border border-gray-300 rounded-l-full focus:outline-none focus:ring-2 focus:ring-gray-300"
+                    placeholder="Type your message..."
                   />
-                  <label htmlFor="file-input" className="absolute top--2 left-6 p-1 cursor-pointer">
-                    <img src="file.png" alt="Attach" className="w-6 h-6" />
-                  </label>
-                  <input
-                    value={newMessage}
-                    onChange={e => setNewMessage(e.target.value)}
-                    onKeyDown={handleKeyPress}
-                    className="w-full pl-12 py-2 border border-gray-300 rounded-full"
-                    placeholder="Type your message here..."
-                  />
-                  <button onClick={sendMessage} className="px-4 py-2 bg-gray-700 text-white rounded-full hover:bg-gray-800">
-                    Send
+                  <button 
+                    type="submit" 
+                    className="px-6 py-3 bg-gray-800 text-white rounded-r-full hover:bg-gray-900 transition-colors duration-200 flex items-center justify-center"
+                  >
+                    <Send size={24} />
                   </button>
-                </div>
+                </form>
               </div>
-          ) : (<div className="flex-grow bg-gray-100 flex items-center justify-center text-center">
-            <div className="flex flex-col items-center justify-center space-y-2">
-              <h2 className="text-2xl font-bold">Connect. Converse. Conquer.</h2>
-              <p>Share it with your friends to chat in private</p>
-              <img
-                src="./share.png"
-                className="h-6 w-6 cursor-pointer"
-                onClick={() => {
-                  if (navigator.share) {
-                    navigator.share({
-                      title: 'Check out this app!',
-                      text: 'Check out this cool app and chat with me in private!',
-                      url: 'https://superchat-tau-seven.vercel.app/', 
-                    })
-                    .then(() => console.log('Successfully shared'))
-                    .catch((error) => console.log('Error sharing:', error));
-                  } else {
-                    console.log('Share API not supported in this browser');
-                  }
-                }}
-              />
-            </div>
-          </div>          
-          )}
-        </>
-      ) : (
-        <div className="flex flex-col items-center justify-center h-screen w-screen space-y-2 bg-white">
-          <img 
-            className="w-32 sm:w-48 md:w-52 lg:w-64 xl:w-128 filter shadow-black drop-shadow-lg drop-shadow-black" 
-            src='logo.png' 
-          />
-          <h1 className='font-bold'><b>SUPERCHAT</b></h1>
-          <h2 className="font-semibold"><b> Connect. Converse. Conquer.</b></h2>
-          <button onClick={handleLogin} className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 ">Sign in with Google</button>
-          <p>Share it with your friends to chat in private</p>
-              <img
-                src="./share.png"
-                className="h-6 w-6 cursor-pointer"
-                onClick={() => {
-                  if (navigator.share) {
-                    navigator.share({
-                      title: 'Check out this app!',
-                      text: 'Check out this cool app and chat with me in private!',
-                      url: 'https://superchat-tau-seven.vercel.app/',
-                    })
-                    .then(() => console.log('Successfully shared'))
-                    .catch((error) => console.log('Error sharing:', error));
-                  } else {
-                    console.log('Share API not supported in this browser');
-                  }
-                }}
-              />
-          <p><b> App still in development more features will be added.</b></p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Username prompt modal */}
+      {showUsernamePrompt && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-8 rounded-3xl shadow-lg w-full max-w-md">
+            <h2 className="text-2xl font-bold mb-4">Set Your Username</h2>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="w-full p-3 border border-gray-300 rounded-full mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Enter username"
+            />
+            <button
+              onClick={handleSetUsername}
+              className="w-full px-6 py-3 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-colors duration-200"
+            >
+              Set Username
+            </button>
+          </div>
         </div>
       )}
     </div>
   );
-}
+};
 
 export default App;
